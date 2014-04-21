@@ -140,6 +140,12 @@ dnl ***********************************
 XDT_CHECK_OPTIONAL_PACKAGE([UPOWERGLIB], [upower-glib], [0.9.8],
                            [upower-glib], [UPower support])
 
+dnl ***************************************************************
+dnl *** Optional support for GUDev ***
+dnl ***************************************************************
+XDT_CHECK_OPTIONAL_PACKAGE([GUDEV], [gudev-1.0], [145], [gudev],
+                           [External keyboard integration])
+
 dnl **************************************
 dnl *** Optional support for Libnotify ***
 dnl **************************************
@@ -261,6 +267,11 @@ if test x"$UPOWERGLIB_FOUND" = x"yes"; then
 echo "* UPower support:            yes"
 else
 echo "* UPower support:            no"
+fi
+if test x"$GUDEV_FOUND" = x"yes"; then
+echo "* GUDev support:             yes"
+else
+echo "* GUDev support:             no"
 fi
 if test x"$LIBNOTIFY_FOUND" = x"yes"; then
 echo "* Libnotify support:         yes"

@@ -37,6 +37,9 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
+#ifdef HAVE_GUDEV
+#include <gudev/gudev.h>
+#endif
 #include <xfconf/xfconf.h>
 #include <libxfce4util/libxfce4util.h>
 
@@ -52,8 +55,16 @@ static void xfce_keyboards_helper_channel_property_changed  (XfconfChannel      
                                                              const gchar              *property_name,
                                                              const GValue             *value,
                                                              XfceKeyboardsHelper      *helper);
+#ifdef HAVE_GUDEV
+static void xfce_keyboards_helper_device_added              (GUdevClient  *client,
+                                                             const gchar              *action,
+                                                             GUdevDevice              *device,
+                                                             XfceKeyboardsHelper      *helper);
+#endif
 static void xfce_keyboards_helper_restore_numlock_state     (XfconfChannel            *channel);
 static void xfce_keyboards_helper_save_numlock_state        (XfconfChannel            *channel);
+static void xfce_keyboards_helper_set_all_settings          (XfceKeyboardsHelper      *helper);
+
 
 
 
@@ -69,6 +80,11 @@ struct _XfceKeyboardsHelper
 
     /* xfconf channel */
     XfconfChannel *channel;
+
+#ifdef HAVE_GUDEV
+    /* GUDev client */
+    GUdevClient *udev_client;
+#endif
 };
 
 
@@ -93,6 +109,7 @@ xfce_keyboards_helper_init (XfceKeyboardsHelper *helper)
 {
     gint dummy;
     gint marjor_ver, minor_ver;
+    static const gchar *subsystems[] = { "input", NULL };
 
     /* init */
     helper->channel = NULL;
@@ -108,10 +125,16 @@ xfce_keyboards_helper_init (XfceKeyboardsHelper *helper)
         g_signal_connect (G_OBJECT (helper->channel), "property-changed",
             G_CALLBACK (xfce_keyboards_helper_channel_property_changed), helper);
 
+#ifdef HAVE_GUDEV
+        /* monitor device changes via udev */
+        helper->udev_client = g_udev_client_new (subsystems);
+        g_signal_connect (helper->udev_client, "uevent",
+                          G_CALLBACK (xfce_keyboards_helper_device_added),
+                          helper);
+#endif
+
         /* load settings */
-        xfce_keyboards_helper_set_auto_repeat_mode (helper);
-        xfce_keyboards_helper_set_repeat_rate (helper);
-        xfce_keyboards_helper_restore_numlock_state (helper->channel);
+        xfce_keyboards_helper_set_all_settings (helper);
     }
     else
     {
@@ -129,6 +152,10 @@ xfce_keyboards_helper_finalize (GObject *object)
 
     /* Save the numlock state */
     xfce_keyboards_helper_save_numlock_state (helper->channel);
+
+#ifdef HAVE_GUDEV
+    g_object_unref (helper->udev_client);
+#endif
 
     (*G_OBJECT_CLASS (xfce_keyboards_helper_parent_class)->finalize) (object);
 }
@@ -220,6 +247,39 @@ xfce_keyboards_helper_channel_property_changed (XfconfChannel      *channel,
 
 
 
+#ifdef HAVE_GUDEV
+static void
+xfce_keyboards_helper_device_added (GUdevClient *client,
+                                                 const gchar *action,
+                                                 GUdevDevice *device,
+                                                 XfceKeyboardsHelper *helper)
+{
+        gboolean is_keyboard = FALSE;
+
+        g_return_if_fail (G_UDEV_IS_CLIENT(client));
+        g_return_if_fail (action != NULL && *action != '\0');
+        g_return_if_fail (G_UDEV_IS_DEVICE (device));
+        g_return_if_fail (helper != NULL);
+        g_return_if_fail (client == helper->udev_client);
+
+        /* Make sure uevent is actually for a keyboard being added */
+        is_keyboard = g_udev_device_get_property_as_boolean (device, "ID_INPUT_KEYBOARD");
+        if (G_LIKELY(!is_keyboard))
+        {
+                return;
+        }
+        if (G_LIKELY(g_strcmp0 (action, "add") != 0))
+        {
+                return;
+        }
+
+        /* This is a keyboard being added. Reapply all keyboard settings. */
+        xfce_keyboards_helper_set_all_settings (helper);
+}
+#endif
+
+
+
 static void
 xfce_keyboards_helper_restore_numlock_state (XfconfChannel *channel)
 {
@@ -270,4 +330,14 @@ xfce_keyboards_helper_save_numlock_state (XfconfChannel *channel)
     xfsettings_dbg (XFSD_DEBUG_KEYBOARDS, "save numlock %s", numlock_state ? "on" : "off");
 
     xfconf_channel_set_bool (channel, "/Default/Numlock", numlock_state);
+}
+
+
+
+static void
+xfce_keyboards_helper_set_all_settings (XfceKeyboardsHelper *helper)
+{
+        xfce_keyboards_helper_set_auto_repeat_mode (helper);
+        xfce_keyboards_helper_set_repeat_rate (helper);
+        xfce_keyboards_helper_restore_numlock_state (helper->channel);
 }
